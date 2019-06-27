@@ -1,0 +1,199 @@
+---
+title: "rahmat-pml"
+author: "rahmat"
+date: "June 27, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+##### Libraries #####
+library(AppliedPredictiveModeling)
+library(caret)
+library(corrplot)
+library(downloader)
+library(e1071)
+library(elasticnet)
+library(ElemStatLearn)
+library(forecast)
+library(gbm)
+library(ggplot2)
+library(ISLR)
+library(kernlab)
+library(knitr)
+library(lubridate)
+library(pander)
+library(pgmm)
+library(quantmod)
+library(readr)
+library(rpart)
+library(rpart.plot)
+library(stringr)
+rm(list=ls())
+```
+ 
+LOAD DATA FROM WEBSITE
+```{r setup, include=FALSE}
+##### Download data #####
+# Download training data
+url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+filename <- "pml-training.csv" 
+download(url, destfile=filename)
+train <- read.csv(filename)
+ntrain <- nrow(train)
+ktrain <- ncol(train)
+
+# Download testing data
+url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+filename <- "pml-testing.csv" 
+download(url, destfile=filename)
+test <- read.csv(filename)
+ntest <- nrow(test)
+ktest <- ncol(test)
+rm(list=c("filename","url"))
+
+```
+
+
+DATA PRE-PROCESSING
+```{r setup, include=FALSE}
+##### Identify NAs #####
+# Setting empty spaces and div0 to be NA
+train[train == ""] <- NA
+train[train=="#DIV/0!"] <- NA
+train[train=="<NA>"] <- NA
+# Dataframe
+NAs <- as.data.frame(colSums(is.na(train)))
+NAs$Variable <- rownames(NAs)
+rownames(NAs) <- NULL
+names(NAs) <- c("NAs","Variable")
+NAs <- subset(NAs,NAs!=0)
+rownames(NAs) <- NULL
+NA1 <- as.data.frame(str_split_fixed(NAs$Variable, "_", 2))
+NAs$statistic <- NA1$V1
+NAs$type <- NA1$V2
+NAs <- NAs[with(NAs, order(statistic,type)), ]
+rownames(NAs) <- NULL
+NAs$Variable <- NULL
+NA2 <- as.data.frame(t(reshape(NAs, v.names="NAs", idvar="statistic", timevar="type", direction="wide")))
+NA2$Variable <- rownames(NA2)
+rownames(NA2) <- NULL
+colnames(NA2) <- c("amplitude","avg","kurtosis","max","min","skewness","stddev","var","statistic")
+NA2 <- NA2[,c(9,1:8)]
+NA2[NA2=="<NA>"] <- "0"
+kable(NA2)
+
+```
+
+```{r setup, include=FALSE}
+##### Marginal tables #####
+# Add day name
+train$cvtd_timestamp <- as.Date(train$cvtd_timestamp, format = "%m/%d/%Y %H:%M")
+train$Day <- as.factor(weekdays(train$cvtd_timestamp)) #Add day variable
+
+# Marginal tables
+prop.table(table(train$classe))
+```
+
+
+```{r setup, include=FALSE}
+prop.table(table(train$classe, train$Day),1)
+
+```
+
+
+
+```{r setup, include=FALSE}
+prop.table(table(train$user_name,train$classe),1) 
+
+```
+
+```{r setup, include=FALSE}
+prop.table(table(train$user_name,train$classe),2) 
+
+```
+
+```{r setup, include=FALSE}
+# Plot
+ggplot(aes(x = user_name, 
+           fill = classe), data = train) + 
+    geom_bar(outlier.shape = NA) +
+    theme_minimal() +
+    coord_flip()
+```
+
+
+```{r setup, include=FALSE}
+##### Cleaning data for the model #####
+# Columns with NA missing values
+train <- train[, colSums(is.na(train)) == 0]
+
+# Columns not relevant to accelerometer measurements.
+classe <- train$classe
+trainRemove<- grepl("^X|timestamp|window", names(train))
+trainModel <- train[, !trainRemove]
+trainModel <- trainModel[, sapply(trainModel, is.numeric)]
+trainModel$classe<- classe
+testRemove<- grepl("^X|timestamp|window", names(test))
+test <- test[, !testRemove]
+testModel <- test[, sapply(test, is.numeric)]
+```
+
+
+DATA MODELLING
+```{r setup, include=FALSE}
+##### Training and test datasets from train data #####
+set.seed(12345)
+inTrain <- createDataPartition(trainModel$classe, p=0.70, list=F)
+trainData <- trainModel[inTrain, ]
+testData <- trainModel[-inTrain, ]
+
+##### Significant variables #####
+controlRf <- trainControl(method="cv", 5)
+rfModel<- train(classe ~., data=trainData, method="rf", trControl=controlRf, importance=TRUE, ntree=50)
+rfModel
+```
+
+```{r setup, include=FALSE}
+corrPlot <- cor(trainData[, -length(names(trainData))])
+corrplot(corrPlot, method="circle")
+
+```
+
+
+
+```{r setup, include=FALSE}
+##### Accuracy on validation data (testData) #####
+predictRFModel <- predict(rfModel, testData)
+confusionMatrix(testData$classe, predictRFModel)
+```
+
+
+```{R}
+accuracy <- postResample(predictRFModel, testData$classe)
+Error <- 1 - as.numeric(confusionMatrix(testData$classe, predictRFModel)$overall[1])
+
+```
+
+
+```{R}
+##### Predicting on Test Dataset using Random Forest model #####
+result <- predict(rfModel, test[, -length(names(test))])
+result
+```
+Predicting on test dataset
+The model estimated was used to forecast the classe variable on the test dataset.
+
+```{R}
+test$classe <- result
+ggplot(aes(x = user_name, 
+           fill = classe), data = test) + 
+    geom_bar() +
+    theme_minimal() + 
+    coord_flip()
+```
+
+
+
+
+
+
